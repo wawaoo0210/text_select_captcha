@@ -215,28 +215,44 @@ class WebCrawler:
             actions.move_to_element_with_offset(
                 img_element, center_x, center_y).click().perform()
             print(f"✅ 点击 {text} 坐标: ({center_x:.1f}, {center_y:.1f})")
-            time.sleep(random.uniform(0.3, 0.7))
+            time.sleep(random.uniform(1, 2))
 
 
 def fill_click_sequence(results, prompt):
     click_sequence = []
+    used_bboxes = set()
+
     for char in prompt:
-        found = next(((t, b) for t, b in results if t == char), None)
+        found = next(((t, b) for t, b in results if t == char and str(b) not in used_bboxes), None)
+        if found:
+            used_bboxes.add(str(found[1]))
         click_sequence.append(found or (char, None))
+
+    print("📌 初步匹配:", click_sequence)
 
     # 补充自定义模型识别
     if any(b is None for _, b in click_sequence):
         alt_results = ImageProcessor.process_image(v_channel_path, detector, myocr)
-        for i, (char, _) in enumerate(click_sequence):
-            if not click_sequence[i][1]:
-                match = next((b for t, b in alt_results if t == char), None)
-                if match:
-                    click_sequence[i] = (char, match)
+        for i, (char, bbox) in enumerate(click_sequence):
+            if bbox is None:
+                found = next(((t, b) for t, b in alt_results if t == char and str(b) not in used_bboxes), None)
+                if found:
+                    click_sequence[i] = found
+                    used_bboxes.add(str(found[1]))
 
-    # 随机填充空白项
+    print("🔁 补充后:", click_sequence)
+
+    # 随机填充空白项，使用未使用的 bboxes
+    remaining_bboxes = [b for _, b in results if str(b) not in used_bboxes]
+    random.shuffle(remaining_bboxes)
+
     for i, (char, bbox) in enumerate(click_sequence):
-        if bbox is None:
-            click_sequence[i] = (char, (random.randint(0, 100), random.randint(0, 100), random.randint(0, 100), random.randint(0, 100)))
+        if bbox is None and remaining_bboxes:
+            chosen_bbox = remaining_bboxes.pop()
+            click_sequence[i] = (char, chosen_bbox)
+            used_bboxes.add(str(chosen_bbox))
+
+    print("✅ 最终点击序列:", click_sequence)
 
     return click_sequence
 
