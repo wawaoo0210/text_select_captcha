@@ -247,7 +247,7 @@ class WebCrawler:
             """, abs_x, abs_y)
 
             # 点击后等一下再点下一次
-            time.sleep(random.uniform(1.0, 2.0))
+            time.sleep(random.uniform(0.3, 0.5))
             print(f"✅ 模拟点击 {text} at ({center_x:.1f}, {center_y:.1f})")
 
     def refresh_page(self):
@@ -309,43 +309,47 @@ if __name__ == "__main__":
                             import_onnx_path="models/click_captcha_0.65625_474_38000_2025-04-16-15-14-11.onnx",
                             charsets_path="models/charsets.json")
 
-    is_recognized = False
+    for i in range(10):
+        print(f"\n🔁 开始第 {i + 1} 次验证")
 
-    while not is_recognized:
+        is_recognized = False
 
         with WebCrawler() as crawler:
-            result = crawler.crawl_images()
 
-            # 处理可能的返回值类型
-            if isinstance(result, tuple):
-                image_paths, prompt = result
-            else:
-                image_paths = result
-                prompt = ""  # 设置默认提示文本
 
-            for img_path in image_paths:
-                try:
-                    # 保存 V 通道图像
-                    v_channel_path = ImageProcessor.save_v_channel(img_path)
+            while not is_recognized:
+                result = crawler.crawl_images()
 
-                    # 识别图像中的文本
-                    results = ImageProcessor.process_image(v_channel_path, detector, recognizer)
+                # 处理可能的返回值类型
+                if isinstance(result, tuple):
+                    image_paths, prompt = result
+                else:
+                    image_paths = result
+                    prompt = ""  # 设置默认提示文本
 
-                    print(f"🧠 {img_path.name} 默认识别结果: {results}")
+                for img_path in image_paths:
+                    try:
+                        # 保存 V 通道图像
+                        v_channel_path = ImageProcessor.save_v_channel(img_path)
 
-                    if len(results) < 4:
-                        print(f"❌ {img_path.name} 识别结果不足 4 个目标，准备刷新页面并重新开始识别。")
-                        crawler.refresh_page()
-                        continue
+                        # 识别图像中的文本
+                        results = ImageProcessor.process_image(v_channel_path, detector, recognizer)
 
-                    is_recognized = True
-                    # 填充点击序列
-                    click_sequence = fill_click_sequence(results, prompt)
+                        print(f"🧠 {img_path.name} 默认识别结果: {results}")
 
-                    print(f"🎯 {img_path.name} 点击序列: {click_sequence}")
+                        if len(results) < 4:
+                            print(f"❌ {img_path.name} 识别结果不足 4 个目标，准备刷新页面并重新开始识别。")
+                            # crawler.refresh_page()
+                            break
 
-                    # 执行点击
-                    crawler._simulate_clicks(img_path, click_sequence)
+                        is_recognized = True
+                        # 填充点击序列
+                        click_sequence = fill_click_sequence(results, prompt)
 
-                except Exception as e:
-                    print(f"❌ 处理 {img_path.name} 失败: {str(e)}")
+                        print(f"🎯 {img_path.name} 点击序列: {click_sequence}")
+
+                        # 执行点击
+                        crawler._simulate_clicks(img_path, click_sequence)
+
+                    except Exception as e:
+                        print(f"❌ 处理 {img_path.name} 失败: {str(e)}")
