@@ -187,7 +187,7 @@ class WebCrawler:
         self.driver.refresh()
 
     def _simulate_clicks(self, image_path: Path, click_sequence: List[tuple]) -> None:
-        """使用预存坐标进行点击"""
+        """使用预存坐标进行点击，模拟更接近人类的点击行为"""
         img_element = self.driver.find_element(By.XPATH, '//img')
         img_rect = self.driver.execute_script(
             "return arguments[0].getBoundingClientRect();", img_element)
@@ -208,14 +208,44 @@ class WebCrawler:
 
             x1, y1, x2, y2 = bbox
             # 计算中心点并转换坐标
-            center_x = (x1 + x2) // 2 * scale_x
-            center_y = (y1 + y2) // 2 * scale_y
+            center_x = (x1 + x2) / 2 * scale_x
+            center_y = (y1 + y2) / 2 * scale_y
 
-            # 使用相对坐标点击
-            actions.move_to_element_with_offset(
-                img_element, center_x, center_y).click().perform()
-            print(f"✅ 点击 {text} 坐标: ({center_x:.1f}, {center_y:.1f})")
+            # 添加一定的随机偏移，模拟人类不规则点击
+            random_offset_x = random.uniform(-5, 5)  # 偏移范围可以调整
+            random_offset_y = random.uniform(-5, 5)
+            center_x += random_offset_x
+            center_y += random_offset_y
+
+            click_x = img_rect['left'] + center_x
+            click_y = img_rect['top'] + center_y
+
+            # 生成鼠标移动轨迹，使其看起来像人类操作
+            # 先从当前位置移动到目标位置，而不是直接点击
+            actions.move_to_element_with_offset(img_element, center_x, center_y).perform()
+
+            # 等待一段随机时间，模拟人类点击前的停顿
+            time.sleep(random.uniform(0.3, 0.7))
+
+            # 执行点击
+            self.driver.execute_script("""
+                var evt = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: arguments[0],
+                    clientY: arguments[1]
+                });
+                document.elementFromPoint(arguments[0], arguments[1]).dispatchEvent(evt);
+            """, click_x, click_y)
+
+            # 点击后停顿，模拟人类在点击后的自然延迟
             time.sleep(random.uniform(1, 2))
+            print(f"✅ 点击 {text} 坐标: ({center_x:.1f}, {center_y:.1f})")
+
+    def refresh_page(self):
+        """刷新页面"""
+        self.driver.refresh()
 
 
 def fill_click_sequence(results, prompt):
@@ -265,40 +295,50 @@ if __name__ == "__main__":
     if not os.path.exists("output"):
         os.makedirs("output")
 
-    with WebCrawler() as crawler:
-        result = crawler.crawl_images()
+    detector = ddddocr.DdddOcr(det=True)
+    recognizer = ddddocr.DdddOcr()
 
-        # 处理可能的返回值类型
-        if isinstance(result, tuple):
-            image_paths, prompt = result
-        else:
-            image_paths = result
-            prompt = ""  # 设置默认提示文本
+    myocr = ddddocr.DdddOcr(det=True,
+                            import_onnx_path="models/click_captcha_0.65625_474_38000_2025-04-16-15-14-11.onnx",
+                            charsets_path="models/charsets.json")
 
-        detector = ddddocr.DdddOcr(det=True)
-        recognizer = ddddocr.DdddOcr()
+    is_recognized = False
 
-        myocr = ddddocr.DdddOcr(det=True,
-                                import_onnx_path="models/click_captcha_0.65625_474_38000_2025-04-16-15-14-11.onnx",
-                                charsets_path="models/charsets.json")
+    while not is_recognized:
 
-        for img_path in image_paths:
-            try:
-                # 保存 V 通道图像
-                v_channel_path = ImageProcessor.save_v_channel(img_path)
+        with WebCrawler() as crawler:
+            result = crawler.crawl_images()
 
-                # 识别图像中的文本
-                results = ImageProcessor.process_image(v_channel_path, detector, recognizer)
+            # 处理可能的返回值类型
+            if isinstance(result, tuple):
+                image_paths, prompt = result
+            else:
+                image_paths = result
+                prompt = ""  # 设置默认提示文本
 
-                print(f"🧠 {img_path.name} 默认识别结果: {results}")
+            for img_path in image_paths:
+                try:
+                    # 保存 V 通道图像
+                    v_channel_path = ImageProcessor.save_v_channel(img_path)
 
-                # 填充点击序列
-                click_sequence = fill_click_sequence(results, prompt)
+                    # 识别图像中的文本
+                    results = ImageProcessor.process_image(v_channel_path, detector, recognizer)
 
-                print(f"🎯 {img_path.name} 点击序列: {click_sequence}")
+                    print(f"🧠 {img_path.name} 默认识别结果: {results}")
 
-                # 执行点击
-                crawler._simulate_clicks(img_path, click_sequence)
+                    if len(results) < 4:
+                        print(f"❌ {img_path.name} 识别结果不足 4 个目标，准备刷新页面并重新开始识别。")
+                        crawler.refresh_page()
+                        continue
 
-            except Exception as e:
-                print(f"❌ 处理 {img_path.name} 失败: {str(e)}")
+                    is_recognized = True
+                    # 填充点击序列
+                    click_sequence = fill_click_sequence(results, prompt)
+
+                    print(f"🎯 {img_path.name} 点击序列: {click_sequence}")
+
+                    # 执行点击
+                    crawler._simulate_clicks(img_path, click_sequence)
+
+                except Exception as e:
+                    print(f"❌ 处理 {img_path.name} 失败: {str(e)}")
