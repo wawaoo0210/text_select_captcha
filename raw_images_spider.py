@@ -14,7 +14,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 
 # 常量定义
@@ -22,7 +21,6 @@ DEFAULT_OUTPUT_DIR = Path("output")
 DEFAULT_CHANNEL_DIR = Path("channel")
 RAW_IMAGE_DIR = Path("./images_raw")
 BASE64_PREFIX = "data:image/png;base64,"
-BORDER_SHRINK = 5
 MIN_BOX_SIZE = 10
 ASPECT_RATIO_LIMIT = 8
 RANDOM_SLEEP_RANGE = (2, 5)
@@ -192,56 +190,65 @@ class WebCrawler:
         img_rect = self.driver.execute_script(
             "return arguments[0].getBoundingClientRect();", img_element)
 
-        # 读取原始图像尺寸
         img = cv2.imread(str(image_path))
         original_h, original_w = img.shape[:2]
 
-        # 计算缩放比例
         scale_x = img_rect['width'] / original_w
         scale_y = img_rect['height'] / original_h
 
-        actions = ActionChains(self.driver)
         for text, bbox in click_sequence:
             if not bbox:
                 print(f"❌ 缺失点击坐标: {text}")
                 continue
 
             x1, y1, x2, y2 = bbox
-            # 计算中心点并转换坐标
             center_x = (x1 + x2) / 2 * scale_x
             center_y = (y1 + y2) / 2 * scale_y
 
-            # 添加一定的随机偏移，模拟人类不规则点击
-            random_offset_x = random.uniform(-5, 5)  # 偏移范围可以调整
-            random_offset_y = random.uniform(-5, 5)
-            center_x += random_offset_x
-            center_y += random_offset_y
+            # 添加小幅随机偏移，模拟不精准点击
+            offset_x = random.uniform(-7, 7)
+            offset_y = random.uniform(-7, 7)
+            center_x += offset_x
+            center_y += offset_y
 
-            click_x = img_rect['left'] + center_x
-            click_y = img_rect['top'] + center_y
+            abs_x = img_rect['left'] + center_x
+            abs_y = img_rect['top'] + center_y
 
-            # 生成鼠标移动轨迹，使其看起来像人类操作
-            # 先从当前位置移动到目标位置，而不是直接点击
-            actions.move_to_element_with_offset(img_element, center_x, center_y).perform()
+            # 模拟“人类”犹豫动作：先错一点，再回来
+            if random.random() < 0.3:
+                dx = random.uniform(-30, 30)
+                dy = random.uniform(-30, 30)
+                webdriver.ActionChains(self.driver).move_by_offset(dx, dy).perform()
+                time.sleep(random.uniform(0.2, 0.4))
 
-            # 等待一段随机时间，模拟人类点击前的停顿
-            time.sleep(random.uniform(0.3, 0.7))
+            # 模拟移动轨迹（分步移动）
+            steps = random.randint(5, 10)
+            for i in range(steps):
+                inter_x = (center_x / steps) * (i + 1)
+                inter_y = (center_y / steps) * (i + 1)
+                webdriver.ActionChains(self.driver).move_to_element_with_offset(img_element, inter_x, inter_y).perform()
+                time.sleep(random.uniform(0.01, 0.03))
 
-            # 执行点击
+            # 等一下，再点击
+            time.sleep(random.uniform(0.3, 0.6))
+
+            # 同时触发完整事件链（JS）
             self.driver.execute_script("""
-                var evt = new MouseEvent('click', {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window,
-                    clientX: arguments[0],
-                    clientY: arguments[1]
+                let el = document.elementFromPoint(arguments[0], arguments[1]);
+                ['mousemove', 'mousedown', 'mouseup', 'click'].forEach(type => {
+                    el.dispatchEvent(new MouseEvent(type, {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: arguments[0],
+                        clientY: arguments[1]
+                    }));
                 });
-                document.elementFromPoint(arguments[0], arguments[1]).dispatchEvent(evt);
-            """, click_x, click_y)
+            """, abs_x, abs_y)
 
-            # 点击后停顿，模拟人类在点击后的自然延迟
-            time.sleep(random.uniform(1, 2))
-            print(f"✅ 点击 {text} 坐标: ({center_x:.1f}, {center_y:.1f})")
+            # 点击后等一下再点下一次
+            time.sleep(random.uniform(1.0, 2.0))
+            print(f"✅ 模拟点击 {text} at ({center_x:.1f}, {center_y:.1f})")
 
     def refresh_page(self):
         """刷新页面"""
